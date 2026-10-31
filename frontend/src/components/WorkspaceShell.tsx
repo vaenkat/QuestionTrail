@@ -1,39 +1,122 @@
-import React, { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Textarea } from "@/components/ui/textarea"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { StatusBadge } from "./StatusBadge"
-import { 
-  Compass, 
-  FileSearch, 
-  Layers, 
-  ListChecks, 
-  AlertCircle,
-  ShieldCheck
-} from "lucide-react"
+import React, { useState } from 'react';
+import { Compass, ShieldCheck, AlertCircle } from 'lucide-react';
+import { StatusBadge } from './StatusBadge';
+import { ProjectSetup } from './ProjectSetup';
+import { AnalysisDashboard } from './AnalysisDashboard';
+import { EvidenceDrawer } from './EvidenceDrawer';
+import { api } from '../services/api';
+import type {
+  AssessmentCategory,
+  Source,
+  AnalysisResult,
+  EvidenceRef,
+} from '../types/api';
 
 export const WorkspaceShell: React.FC = () => {
-  const [objective, setObjective] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const [projectCreated, setProjectCreated] = useState(false)
-  const [showErrorDemo, setShowErrorDemo] = useState(false)
+  const [objective, setObjective] = useState('');
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [categories, setCategories] = useState<AssessmentCategory[]>([]);
+  const [sources, setSources] = useState<Source[]>([]);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [analysisMode, setAnalysisMode] = useState<string>('precomputed');
 
-  const handleCreateProject = () => {
-    if (!objective.trim()) return
-    setIsLoading(true)
-    setTimeout(() => {
-      setIsLoading(false)
-      setProjectCreated(true)
-    }, 400)
-  }
+  // Loading states
+  const [isProposing, setIsProposing] = useState(false);
+  const [isLoadingDemo, setIsLoadingDemo] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Evidence Drawer state
+  const [selectedEvidence, setSelectedEvidence] = useState<EvidenceRef | null>(null);
+  const [selectedSource, setSelectedSource] = useState<Source | null>(null);
+
+  const handleOpenEvidence = (evidence: EvidenceRef, source: Source | null) => {
+    setSelectedEvidence(evidence);
+    setSelectedSource(source);
+  };
+
+  const handleCloseEvidence = () => {
+    setSelectedEvidence(null);
+    setSelectedSource(null);
+  };
+
+  // 1. Propose Categories from objective
+  const handleProposeCategories = async () => {
+    if (!objective.trim()) return;
+    try {
+      setIsProposing(true);
+      setErrorMessage(null);
+      const proposed = await api.proposeCategories(objective);
+      setCategories(proposed);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsProposing(false);
+    }
+  };
+
+  // 2. Load Curated Demo
+  const handleLoadCuratedDemo = async () => {
+    try {
+      setIsLoadingDemo(true);
+      setErrorMessage(null);
+
+      // Create project if not exists
+      let currentId = projectId;
+      if (!currentId) {
+        const created = await api.createProject(objective || 'Reliance Foundation Scholarship 2026-27', categories);
+        currentId = created.id;
+        setProjectId(currentId);
+      }
+
+      const res = await api.loadCuratedDemo(currentId);
+      setObjective(res.project.objective);
+      setCategories(res.project.categories);
+      setSources(res.sources);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsLoadingDemo(false);
+    }
+  };
+
+  // 3. Run Analysis
+  const handleRunAnalysis = async () => {
+    try {
+      setIsAnalyzing(true);
+      setErrorMessage(null);
+
+      let currentId = projectId;
+      if (!currentId) {
+        const created = await api.createProject(objective, categories);
+        currentId = created.id;
+        setProjectId(currentId);
+      }
+
+      const resp = await api.analyzeProject(currentId);
+      setAnalysisResult(resp.result);
+      setAnalysisMode(resp.mode);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Reset to create another run
+  const handleReset = () => {
+    setAnalysisResult(null);
+    setProjectId(null);
+    setSources([]);
+    setSelectedEvidence(null);
+    setSelectedSource(null);
+    setErrorMessage(null);
+  };
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A] flex flex-col font-sans">
       {/* Top Header */}
-      <header className="bg-white border-b border-[#CBD5E1] px-6 py-4 flex items-center justify-between sticky top-0 z-10">
+      <header className="bg-white border-b border-[#CBD5E1] px-6 py-4 flex items-center justify-between sticky top-0 z-30 shadow-2xs">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-[#0F766E] flex items-center justify-center text-white">
             <Compass className="w-6 h-6" aria-hidden="true" />
@@ -49,7 +132,14 @@ export const WorkspaceShell: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <StatusBadge status="precomputed" label="Curated baseline mode" />
+          {analysisResult ? (
+            <StatusBadge
+              status={analysisMode === 'precomputed' ? 'precomputed' : 'supported'}
+              label={analysisMode === 'precomputed' ? 'Curated baseline' : 'Analyzed'}
+            />
+          ) : (
+            <StatusBadge status="precomputed" label="Curated baseline mode" />
+          )}
           <div className="flex items-center gap-1.5 text-[14px] text-[#475569] bg-slate-100 px-3 py-1.5 rounded-md border border-[#CBD5E1]">
             <ShieldCheck className="w-4 h-4 text-[#0F766E]" aria-hidden="true" />
             <span>Provenance Safe</span>
@@ -57,208 +147,69 @@ export const WorkspaceShell: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Workspace Canvas */}
+      {/* Main Content Area */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8">
-        {!projectCreated ? (
-          <div className="space-y-6">
-            {/* Empty State / Research Objective Setup */}
-            <Card className="bg-white border border-[#CBD5E1] rounded-[12px] shadow-none">
-              <CardHeader className="p-6 pb-4">
-                <CardTitle className="text-[28px] font-semibold leading-[1.2] text-[#0F172A]">
-                  Start with a research objective
-                </CardTitle>
-                <CardDescription className="text-[16px] text-[#475569] leading-[1.5] mt-2">
-                  Describe what you need to verify, then QuestionTrail will propose an editable assessment framework.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-6 pt-0 space-y-4">
-                <div className="space-y-2">
-                  <label 
-                    htmlFor="research-objective" 
-                    className="block text-[14px] font-semibold text-[#0F172A] leading-[1.4]"
-                  >
-                    Research Objective
-                  </label>
-                  <Textarea
-                    id="research-objective"
-                    placeholder="e.g. Assess whether the available sources provide consistent and sufficiently current information about the Reliance Foundation Undergraduate Scholarship 2026–27..."
-                    value={objective}
-                    onChange={(e) => setObjective(e.target.value)}
-                    rows={4}
-                    className="w-full text-[16px] leading-[1.5] border-[#CBD5E1] rounded-[8px] focus-visible:ring-2 focus-visible:ring-[#0F766E] focus-visible:outline-none"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between pt-2">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      type="button"
-                      size="sm"
-                      onClick={() => setObjective("Assess whether the available sources provide consistent and sufficiently current information about the Reliance Foundation Undergraduate Scholarship 2026–27. Identify outdated information, conflicting claims, unanswered questions and what should be verified using official sources.")}
-                      className="text-[14px] text-[#0F766E] hover:text-[#0F766E] hover:bg-[#0F766E]/10"
-                    >
-                      Load demo objective
-                    </Button>
-                  </div>
-
-                  <Button
-                    onClick={handleCreateProject}
-                    disabled={!objective.trim() || isLoading}
-                    className="min-h-[44px] px-6 text-[14px] font-semibold bg-[#0F766E] hover:bg-[#0F766E]/90 text-white rounded-[8px] transition-opacity focus-visible:ring-2 focus-visible:ring-[#0F766E]"
-                  >
-                    {isLoading ? "Proposing framework..." : "Create Research Project"}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Error State Preview Toggle */}
-            <div className="pt-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowErrorDemo(!showErrorDemo)}
-                className="text-[14px] text-[#475569] border-[#CBD5E1]"
-              >
-                {showErrorDemo ? "Hide error sample" : "Preview actionable error contract"}
-              </Button>
-
-              {showErrorDemo && (
-                <div className="mt-4">
-                  <Alert variant="destructive" className="bg-[#B91C1C]/5 border-[#B91C1C] text-[#B91C1C] rounded-[8px]">
-                    <AlertCircle className="w-5 h-5 text-[#B91C1C]" />
-                    <AlertTitle className="text-[14px] font-semibold">Source Ingestion Error</AlertTitle>
-                    <AlertDescription className="text-[16px] leading-[1.5] mt-1 text-[#0F172A]">
-                      We couldn’t process this source. Check that the URL/PDF is accessible, then try again or keep it out of this analysis.
-                    </AlertDescription>
-                  </Alert>
-                </div>
-              )}
+        {/* Error Notification */}
+        {errorMessage && (
+          <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <span className="font-semibold">Action Failed:</span> {errorMessage}
             </div>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {/* Active Project Header */}
-            <Card className="bg-white border border-[#CBD5E1] rounded-[12px] p-6 shadow-none">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-[#CBD5E1]">
-                <div>
-                  <span className="text-[14px] font-semibold text-[#0F766E] uppercase tracking-wider">
-                    Active Project
-                  </span>
-                  <h2 className="text-[20px] font-semibold leading-[1.2] text-[#0F172A] mt-1">
-                    {objective}
-                  </h2>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setProjectCreated(false)}
-                  className="self-start md:self-auto text-[14px] text-[#475569] border-[#CBD5E1]"
-                >
-                  Reset Objective
-                </Button>
-              </div>
-
-              {/* Workspace Navigation Tabs */}
-              <Tabs defaultValue="framework" className="mt-6">
-                <TabsList className="bg-[#F8FAFC] border border-[#CBD5E1] p-1 rounded-[8px]">
-                  <TabsTrigger 
-                    value="framework" 
-                    className="min-h-[38px] text-[14px] font-medium data-[state=active]:bg-white data-[state=active]:text-[#0F766E] data-[state=active]:shadow-none"
-                  >
-                    <Layers className="w-4 h-4 mr-2" />
-                    Assessment Framework
-                  </TabsTrigger>
-                  <TabsTrigger 
-                    value="sources" 
-                    className="min-h-[38px] text-[14px] font-medium data-[state=active]:bg-white data-[state=active]:text-[#0F766E] data-[state=active]:shadow-none"
-                  >
-                    <FileSearch className="w-4 h-4 mr-2" />
-                    Sources & Provenance
-                  </TabsTrigger>
-                  <TabsTrigger 
-                    value="checklist" 
-                    className="min-h-[38px] text-[14px] font-medium data-[state=active]:bg-white data-[state=active]:text-[#0F766E] data-[state=active]:shadow-none"
-                  >
-                    <ListChecks className="w-4 h-4 mr-2" />
-                    Verification Checklist
-                  </TabsTrigger>
-                </TabsList>
-
-                {/* Framework Tab Content */}
-                <TabsContent value="framework" className="mt-6 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-[20px] font-semibold leading-[1.2] text-[#0F172A]">
-                        Assessment Categories
-                      </h3>
-                      <p className="text-[14px] text-[#475569] leading-[1.4] mt-1">
-                        Review AI-suggested categories before analyzing sources.
-                      </p>
-                    </div>
-                    <Button 
-                      className="min-h-[44px] px-6 text-[14px] font-semibold bg-[#0F766E] hover:bg-[#0F766E]/90 text-white rounded-[8px]"
-                    >
-                      Approve Assessment Framework
-                    </Button>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                    <Card className="border border-[#CBD5E1] rounded-[8px] p-4 bg-white">
-                      <div className="flex items-center justify-between pb-2">
-                        <span className="text-[16px] font-semibold text-[#0F172A]">Eligibility Criteria</span>
-                        <StatusBadge status="ai-suggestion" />
-                      </div>
-                      <p className="text-[14px] text-[#475569] leading-[1.4]">
-                        Evaluates required qualifications, household income thresholds, and academic standings.
-                      </p>
-                    </Card>
-
-                    <Card className="border border-[#CBD5E1] rounded-[8px] p-4 bg-white">
-                      <div className="flex items-center justify-between pb-2">
-                        <span className="text-[16px] font-semibold text-[#0F172A]">Key Deadlines & Cycles</span>
-                        <StatusBadge status="ai-suggestion" />
-                      </div>
-                      <p className="text-[14px] text-[#475569] leading-[1.4]">
-                        Evaluates application deadlines, registration cutoffs, and relevant academic cycles.
-                      </p>
-                    </Card>
-                  </div>
-                </TabsContent>
-
-                {/* Sources Tab Content */}
-                <TabsContent value="sources" className="mt-6">
-                  <div className="border border-dashed border-[#CBD5E1] rounded-[8px] p-8 text-center bg-white">
-                    <h3 className="text-[20px] font-semibold text-[#0F172A] leading-[1.2]">
-                      Add a source to begin evidence review
-                    </h3>
-                    <p className="text-[16px] text-[#475569] leading-[1.5] mt-2">
-                      Use the curated demo sources or add a public URL/PDF.
-                    </p>
-                  </div>
-                </TabsContent>
-
-                {/* Checklist Tab Content */}
-                <TabsContent value="checklist" className="mt-6">
-                  <div className="space-y-3">
-                    <h3 className="text-[20px] font-semibold text-[#0F172A]">
-                      Verification Checklist
-                    </h3>
-                    <p className="text-[14px] text-[#475569]">
-                      Prioritized verification actions derived deterministically from evidence status.
-                    </p>
-                    <div className="space-y-2 pt-2">
-                      <Skeleton className="h-12 w-full bg-slate-200" />
-                      <Skeleton className="h-12 w-full bg-slate-200" />
-                    </div>
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </Card>
+            <button
+              onClick={() => setErrorMessage(null)}
+              className="text-xs font-semibold text-rose-700 hover:text-rose-900"
+            >
+              Dismiss
+            </button>
           </div>
         )}
+
+        {/* View switching: Setup vs Active Analysis Dashboard */}
+        {!analysisResult ? (
+          <div className="space-y-6">
+            <div className="space-y-1">
+              <h2 className="text-2xl font-bold text-slate-900">
+                Setup Research Investigation
+              </h2>
+              <p className="text-sm text-slate-500">
+                Define your research objective, review evaluation categories, and load source evidence.
+              </p>
+            </div>
+
+            <ProjectSetup
+              objective={objective}
+              setObjective={setObjective}
+              categories={categories}
+              setCategories={setCategories}
+              sources={sources}
+              onProposeCategories={handleProposeCategories}
+              onLoadCuratedDemo={handleLoadCuratedDemo}
+              onRunAnalysis={handleRunAnalysis}
+              isProposing={isProposing}
+              isLoadingDemo={isLoadingDemo}
+              isAnalyzing={isAnalyzing}
+            />
+          </div>
+        ) : (
+          <AnalysisDashboard
+            result={analysisResult}
+            mode={analysisMode}
+            categories={categories}
+            onSelectEvidence={handleOpenEvidence}
+            onReset={handleReset}
+          />
+        )}
       </main>
+
+      {/* Slide-out Evidence Drawer */}
+      {selectedEvidence && (
+        <EvidenceDrawer
+          evidence={selectedEvidence}
+          source={selectedSource}
+          onClose={handleCloseEvidence}
+        />
+      )}
     </div>
-  )
-}
+  );
+};

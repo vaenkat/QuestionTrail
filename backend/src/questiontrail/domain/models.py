@@ -23,6 +23,9 @@ class SourceAuthority(str, Enum):
     unknown = "unknown"
 
 
+ANALYSIS_SCHEMA_VERSION = "1.0.0"
+
+
 class ExtractionStatus(str, Enum):
     """Status of content or claim extraction."""
     pending = "pending"

@@ -19,10 +19,12 @@ from questiontrail.domain.models import (
     ResearchProject,
     AnalysisResult,
     AnalysisSnapshot,
+    ANALYSIS_SCHEMA_VERSION,
     utc_now,
 )
 
 __all__ = [
+    "ANALYSIS_SCHEMA_VERSION",
     "SourceType",
     "SourceAuthority",
     "ExtractionStatus",

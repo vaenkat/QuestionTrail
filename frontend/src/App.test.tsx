@@ -1,32 +1,68 @@
 import { render, screen } from "@testing-library/react"
 import { describe, it, expect } from "vitest"
 import App from "./App"
+import { EvidenceDrawer } from "./components/EvidenceDrawer"
+import type { EvidenceRef, Source } from "./types/api"
 
-describe("WorkspaceShell foundation", () => {
-  it("renders workspace branding and initial empty state", () => {
+describe("WorkspaceShell foundation and Phase 2 workflow", () => {
+  it("renders workspace branding and setup controls", () => {
     render(<App />)
     
     // Top header branding
     expect(screen.getByText("QuestionTrail")).toBeInTheDocument()
     expect(screen.getByText("Evidence-first research workspace")).toBeInTheDocument()
+    expect(screen.getByText("Curated baseline mode")).toBeInTheDocument()
     
-    // Exact copywriting contract checks from 01-UI-SPEC.md
-    expect(screen.getByText("Start with a research objective")).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        "Describe what you need to verify, then QuestionTrail will propose an editable assessment framework."
-      )
-    ).toBeInTheDocument()
+    // Objective input
+    expect(screen.getByText("1. Research Objective")).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/Enter a free-text research objective/i)).toBeInTheDocument()
     
-    // Primary CTA check
-    const createBtn = screen.getByRole("button", { name: "Create Research Project" })
-    expect(createBtn).toBeInTheDocument()
-    expect(createBtn).toBeDisabled() // Disabled until input has text
+    // Buttons
+    expect(screen.getByRole("button", { name: /generate categories/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /load curated demo corpus/i })).toBeInTheDocument()
+    
+    // Analysis CTA is disabled until ready
+    const analyzeBtn = screen.getByRole("button", { name: /execute analysis/i })
+    expect(analyzeBtn).toBeInTheDocument()
+    expect(analyzeBtn).toBeDisabled()
   })
 
-  it("renders precomputed analysis mode badge", () => {
-    render(<App />)
-    expect(screen.getByTestId("status-precomputed")).toBeInTheDocument()
-    expect(screen.getByText("Curated baseline mode")).toBeInTheDocument()
+  it("renders evidence drawer with exact quote and provenance metadata", () => {
+    const mockEvidence: EvidenceRef = {
+      source_id: "src-rf-portal-2627",
+      exact_snippet: "All online applications must be completed and submitted by October 6, 2026 at 11:59 PM IST.",
+      location_type: "section",
+      location_value: "Important Dates",
+    }
+    const mockSource: Source = {
+      id: "src-rf-portal-2627",
+      title: "Reliance Foundation Undergraduate Scholarship Application Portal",
+      url: "https://scholarships.reliancefoundation.org/UG_Scholarship.aspx",
+      type: "webpage",
+      authority: "primary_official",
+      publication_date: "2026-08-14",
+      cycle_or_version: "2026-27",
+      retrieved_at: "2026-10-31T12:00:00Z",
+      extraction_status: "success",
+      content_hash: "abcd1234efgh5678",
+    }
+
+    render(
+      <EvidenceDrawer
+        evidence={mockEvidence}
+        source={mockSource}
+        onClose={() => {}}
+      />
+    )
+
+    expect(screen.getByText("Source Evidence Provenance")).toBeInTheDocument()
+    expect(screen.getByText(/"All online applications must be completed and submitted by October 6, 2026 at 11:59 PM IST."/i)).toBeInTheDocument()
+    expect(screen.getByText("Reliance Foundation Undergraduate Scholarship Application Portal")).toBeInTheDocument()
+    expect(screen.getByText("Official Primary")).toBeInTheDocument()
+    expect(screen.getByText("Important Dates")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /open original source document/i })).toHaveAttribute(
+      "href",
+      "https://scholarships.reliancefoundation.org/UG_Scholarship.aspx"
+    )
   })
 })
