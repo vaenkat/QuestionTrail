@@ -88,4 +88,49 @@ export const api = {
   getReport: async (projectId: string): Promise<ReportResponse> => {
     return request<ReportResponse>(`/projects/${projectId}/report`);
   },
+
+  ingestUrl: async (projectId: string, url: string): Promise<ProjectDetailResponse> => {
+    return request<ProjectDetailResponse>(`/projects/${projectId}/sources/url`, {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+  },
+
+  ingestPdf: async (projectId: string, file: File): Promise<ProjectDetailResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${BASE_URL}/projects/${projectId}/sources/pdf`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      let errorDetail = `HTTP ${res.status}`;
+      try {
+        const errJson = await res.json();
+        if (errJson.detail) {
+          errorDetail = typeof errJson.detail === 'string' ? errJson.detail : JSON.stringify(errJson.detail);
+        }
+      } catch {}
+      throw new ApiError(res.status, errorDetail);
+    }
+    return res.json() as Promise<ProjectDetailResponse>;
+  },
+
+  ingestText: async (
+    projectId: string,
+    title: string,
+    content: string,
+    url?: string,
+    publicationDate?: string
+  ): Promise<ProjectDetailResponse> => {
+    return request<ProjectDetailResponse>(`/projects/${projectId}/sources/text`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title,
+        content,
+        url,
+        publication_date: publicationDate,
+      }),
+    });
+  },
 };

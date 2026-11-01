@@ -23,8 +23,64 @@ export const WorkspaceShell: React.FC = () => {
   // Loading states
   const [isProposing, setIsProposing] = useState(false);
   const [isLoadingDemo, setIsLoadingDemo] = useState(false);
+  const [isIngestingUrl, setIsIngestingUrl] = useState(false);
+  const [isIngestingPdf, setIsIngestingPdf] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Helper to guarantee a project ID exists
+  const ensureProjectId = async (): Promise<string> => {
+    if (projectId) return projectId;
+    const defaultObj = objective.trim() || 'Custom Research Project';
+    const created = await api.createProject(defaultObj, categories);
+    setProjectId(created.id);
+    return created.id;
+  };
+
+  // Ingest URL handler
+  const handleIngestUrl = async (url: string) => {
+    try {
+      setIsIngestingUrl(true);
+      setErrorMessage(null);
+      const currentId = await ensureProjectId();
+      const res = await api.ingestUrl(currentId, url);
+      setSources(res.sources);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      setIsIngestingUrl(false);
+    }
+  };
+
+  // Ingest PDF handler
+  const handleIngestPdf = async (file: File) => {
+    try {
+      setIsIngestingPdf(true);
+      setErrorMessage(null);
+      const currentId = await ensureProjectId();
+      const res = await api.ingestPdf(currentId, file);
+      setSources(res.sources);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      setIsIngestingPdf(false);
+    }
+  };
+
+  // Ingest Text handler
+  const handleIngestText = async (title: string, content: string, url?: string, pubDate?: string) => {
+    try {
+      setErrorMessage(null);
+      const currentId = await ensureProjectId();
+      const res = await api.ingestText(currentId, title, content, url, pubDate);
+      setSources(res.sources);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : String(err));
+      throw err;
+    }
+  };
 
   // Evidence Drawer state
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceRef | null>(null);
@@ -185,9 +241,14 @@ export const WorkspaceShell: React.FC = () => {
               sources={sources}
               onProposeCategories={handleProposeCategories}
               onLoadCuratedDemo={handleLoadCuratedDemo}
+              onIngestUrl={handleIngestUrl}
+              onIngestPdf={handleIngestPdf}
+              onIngestText={handleIngestText}
               onRunAnalysis={handleRunAnalysis}
               isProposing={isProposing}
               isLoadingDemo={isLoadingDemo}
+              isIngestingUrl={isIngestingUrl}
+              isIngestingPdf={isIngestingPdf}
               isAnalyzing={isAnalyzing}
             />
           </div>

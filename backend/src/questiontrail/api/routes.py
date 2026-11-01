@@ -2,13 +2,16 @@
 
 import uuid
 from typing import Any
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel, Field
 
 from questiontrail.domain.models import (
     ResearchProject,
     AssessmentCategory,
     Source,
+    SourceType,
+    SourceAuthority,
+    ExtractionStatus,
     AnalysisResult,
     ANALYSIS_SCHEMA_VERSION,
     utc_now,
@@ -17,6 +20,9 @@ from questiontrail.settings import Settings, get_settings
 from questiontrail.services.category_service import CategoryService
 from questiontrail.services.analysis_orchestrator import AnalysisOrchestrator
 from questiontrail.services.structured_generation import StructuredGenerationService
+from questiontrail.services.url_ingestion import fetch_and_extract_url, IngestionError
+from questiontrail.services.pdf_ingestion import extract_pdf_source
+from questiontrail.services.canonical import compute_content_hash
 from questiontrail.llm.router import build_router_from_settings
 from questiontrail.data.scholarship_corpus import (
     DEMO_OBJECTIVE,
@@ -69,6 +75,17 @@ class ProposeCategoriesResponse(BaseModel):
 class CreateProjectRequest(BaseModel):
     objective: str = Field(..., min_length=3, description="Free-text research objective")
     categories: list[AssessmentCategory] = Field(default_factory=list)
+
+
+class IngestUrlRequest(BaseModel):
+    url: str = Field(..., min_length=4, description="Public HTTP/HTTPS URL")
+
+
+class IngestTextRequest(BaseModel):
+    title: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=10)
+    url: str | None = None
+    publication_date: str | None = None
 
 
 class ProjectDetailResponse(BaseModel):
@@ -176,6 +193,114 @@ def load_curated_demo(
     return ProjectDetailResponse(
         project=project,
         sources=curated_sources,
+        has_analysis=project_id in store.results,
+    )
+
+
+@router.post("/projects/{project_id}/sources/url", response_model=ProjectDetailResponse)
+def ingest_url_source(
+    project_id: str,
+    req: IngestUrlRequest,
+    store: ProjectStore = Depends(get_project_store),
+) -> ProjectDetailResponse:
+    """Safely ingest public URL content with SSRF protection into project."""
+    project = store.projects.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+
+    try:
+        source = fetch_and_extract_url(req.url)
+    except IngestionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    current_sources = store.sources.setdefault(project_id, [])
+    # Check if source with identical URL or content hash already ingested
+    existing = next((s for s in current_sources if s.url == source.url or s.content_hash == source.content_hash), None)
+    if not existing:
+        current_sources.append(source)
+        project.source_ids = [s.id for s in current_sources]
+        project.updated_at = utc_now()
+        # Invalidate existing analysis for this project since source corpus changed
+        if project_id in store.results:
+            del store.results[project_id]
+
+    return ProjectDetailResponse(
+        project=project,
+        sources=current_sources,
+        has_analysis=project_id in store.results,
+    )
+
+
+@router.post("/projects/{project_id}/sources/pdf", response_model=ProjectDetailResponse)
+async def ingest_pdf_source(
+    project_id: str,
+    file: UploadFile = File(...),
+    store: ProjectStore = Depends(get_project_store),
+) -> ProjectDetailResponse:
+    """Upload and extract text from PDF document into project."""
+    project = store.projects.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+
+    filename = file.filename or "uploaded.pdf"
+    content = await file.read()
+    try:
+        source, _ = extract_pdf_source(content, filename=filename)
+    except IngestionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    current_sources = store.sources.setdefault(project_id, [])
+    existing = next((s for s in current_sources if s.content_hash == source.content_hash), None)
+    if not existing:
+        current_sources.append(source)
+        project.source_ids = [s.id for s in current_sources]
+        project.updated_at = utc_now()
+        if project_id in store.results:
+            del store.results[project_id]
+
+    return ProjectDetailResponse(
+        project=project,
+        sources=current_sources,
+        has_analysis=project_id in store.results,
+    )
+
+
+@router.post("/projects/{project_id}/sources/text", response_model=ProjectDetailResponse)
+def ingest_text_source(
+    project_id: str,
+    req: IngestTextRequest,
+    store: ProjectStore = Depends(get_project_store),
+) -> ProjectDetailResponse:
+    """Add custom text content into project."""
+    project = store.projects.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+
+    body_text = req.content.strip()
+    content_hash = compute_content_hash(body_text)
+    source = Source(
+        id=f"src-text-{content_hash[:8]}",
+        title=req.title.strip(),
+        url=req.url,
+        type=SourceType.document,
+        authority=SourceAuthority.third_party,
+        publication_date=req.publication_date,
+        retrieved_at=utc_now(),
+        extraction_status=ExtractionStatus.success,
+        content_hash=content_hash,
+        raw_content=body_text,
+    )
+
+    current_sources = store.sources.setdefault(project_id, [])
+    current_sources.append(source)
+    project.source_ids = [s.id for s in current_sources]
+    project.updated_at = utc_now()
+    if project_id in store.results:
+        del store.results[project_id]
+
+    return ProjectDetailResponse(
+        project=project,
+        sources=current_sources,
         has_analysis=project_id in store.results,
     )
 

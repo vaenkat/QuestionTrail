@@ -96,3 +96,87 @@ def test_project_lifecycle_end_to_end():
 def test_get_nonexistent_project_returns_404():
     response = client.get("/api/projects/proj-nonexistent-999")
     assert response.status_code == 404
+
+
+def test_ingest_text_source_and_analyze_dynamically():
+    # 1. Create project
+    create_resp = client.post(
+        "/api/projects",
+        json={
+            "objective": "Assess global quantum computing security risks",
+            "categories": [
+                {
+                    "id": "cat-post-quantum",
+                    "name": "Post-Quantum Cryptography",
+                    "description": "Migration timelines and cryptographic vulnerabilities.",
+                    "evaluation_question": "What algorithms are deprecated by NIST?",
+                    "enabled": True,
+                }
+            ],
+        },
+    )
+    assert create_resp.status_code == 200
+    proj_id = create_resp.json()["id"]
+
+    # 2. Ingest raw text source
+    ingest_resp = client.post(
+        f"/api/projects/{proj_id}/sources/text",
+        json={
+            "title": "NIST Post-Quantum Cryptography Standards 2026",
+            "content": "NIST finalized ML-KEM and ML-DSA standards. Legacy RSA-2048 is flagged as vulnerable to quantum cryptanalysis.",
+            "publication_date": "2026-08-15",
+            "url": "https://csrc.nist.gov/pqc",
+        },
+    )
+    assert ingest_resp.status_code == 200
+    data = ingest_resp.json()
+    assert len(data["sources"]) == 1
+    assert data["sources"][0]["title"] == "NIST Post-Quantum Cryptography Standards 2026"
+
+    # 3. Analyze dynamically (not curated scholarship!)
+    analyze_resp = client.post(f"/api/projects/{proj_id}/analyze")
+    assert analyze_resp.status_code == 200
+    res = analyze_resp.json()
+    assert res["mode"] in ("live", "mock", "precomputed")
+    result = res["result"]
+    assert result["project_id"] == proj_id
+    assert len(result["claims"]) >= 1
+    # Check that the claim links to our custom NIST source
+    assert result["claims"][0]["evidence_refs"][0]["source_id"] == data["sources"][0]["id"]
+
+
+def test_ingest_pdf_source_endpoint():
+    # 1. Create project
+    create_resp = client.post(
+        "/api/projects",
+        json={
+            "objective": "Analyze corporate governance reports",
+            "categories": [],
+        },
+    )
+    proj_id = create_resp.json()["id"]
+
+    # 2. Upload invalid PDF format -> 400
+    fail_upload = client.post(
+        f"/api/projects/{proj_id}/sources/pdf",
+        files={"file": ("test.pdf", b"NOT_A_VALID_PDF_FILE", "application/pdf")},
+    )
+    assert fail_upload.status_code == 400
+    assert "standard PDF header" in fail_upload.json()["detail"]
+
+
+def test_ingest_url_ssrf_rejection():
+    # 1. Create project
+    create_resp = client.post(
+        "/api/projects",
+        json={"objective": "Security evaluation", "categories": []},
+    )
+    proj_id = create_resp.json()["id"]
+
+    # 2. Ingest localhost URL -> 400 Bad Request
+    ssrf_resp = client.post(
+        f"/api/projects/{proj_id}/sources/url",
+        json={"url": "http://127.0.0.1:8080/admin"},
+    )
+    assert ssrf_resp.status_code == 400
+    assert "forbidden" in ssrf_resp.json()["detail"].lower()

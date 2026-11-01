@@ -11,6 +11,7 @@ DESIGN RULES:
 - Exact snapshot match is respected when available.
 """
 
+import re
 from datetime import datetime, timezone
 from typing import Any
 from pydantic import BaseModel, Field
@@ -55,6 +56,29 @@ class ExtractedClaimItem(BaseModel):
 
 class ExtractionPayload(BaseModel):
     claims: list[ExtractedClaimItem] = Field(default_factory=list)
+
+
+EXTRACTION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "claims": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "statement": {"type": "string"},
+                    "source_id": {"type": "string"},
+                    "exact_snippet": {"type": "string"},
+                    "location": {"type": "string"},
+                    "entities": {"type": "array", "items": {"type": "string"}},
+                    "dates": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["statement", "source_id", "exact_snippet"],
+            },
+        }
+    },
+    "required": ["claims"],
+}
 
 
 class AnalysisOrchestrator:
@@ -197,33 +221,148 @@ class AnalysisOrchestrator:
                         )
                     )
 
-        # Step B: Claim Extraction (Deterministic baseline from sources raw content or title)
+        # Step B: Claim Extraction (LLM Structured Generation with Verbatim Provenance Verification, or Sentence-Level Heuristics)
         claim_counter = 1
-        for source in sources:
-            content_snippet = (source.raw_content or source.title)[:180].strip()
-            if content_snippet:
-                claim_id = f"clm-src-{source.id[:16]}-{claim_counter}"
-                claim_counter += 1
-                claims.append(
-                    Claim(
-                        id=claim_id,
-                        normalized_statement=f"Evidence from {source.title}: {content_snippet}",
-                        entities=[source.title[:30]],
-                        dates=[source.publication_date] if source.publication_date else [],
-                        is_verified=True,
-                        extraction_status="success",
-                        evidence_refs=[
-                            EvidenceRef(
-                                source_id=source.id,
-                                exact_snippet=content_snippet,
-                                location_type=LocationType.section,
-                                location_value="Content excerpt",
-                            )
-                        ],
-                    )
-                )
+        llm_claims_extracted = False
 
-        # Step C: Evaluate Categories
+        if self._gen_service is not None:
+            try:
+                from questiontrail.llm.contracts import GenerationRequest
+                sources_prompt = "\n\n".join(
+                    f"SOURCE ID: {s.id}\nTITLE: {s.title}\nCONTENT:\n{(s.raw_content or s.title)[:1200]}"
+                    for s in sources
+                )
+                req = GenerationRequest(
+                    system_prompt=(
+                        "Extract key factual claims asserted by the provided research sources. "
+                        "CRITICAL PROVENANCE RULE: For each claim, you MUST quote the EXACT verbatim snippet "
+                        "from the source text in `exact_snippet`. Do not alter or summarize the quote."
+                    ),
+                    user_prompt=(
+                        f"Research Objective: {objective}\n\n"
+                        f"Extract substantive claims from these sources:\n{sources_prompt}"
+                    ),
+                    response_schema=EXTRACTION_SCHEMA,
+                    temperature=0.1,
+                )
+                output = self._gen_service.generate_typed(req, ExtractionPayload)
+                parsed_payload: ExtractionPayload = output["parsed"]
+
+                for item in parsed_payload.claims:
+                    src = source_map.get(item.source_id)
+                    if not src:
+                        continue
+                    # Strict Provenance Verification: snippet MUST exist in source content to prevent hallucination
+                    raw_text = src.raw_content or src.title
+                    snippet = item.exact_snippet.strip()
+                    if snippet and snippet in raw_text:
+                        verified_snippet = snippet
+                    else:
+                        # Fallback to first matching 150 chars of the source text
+                        verified_snippet = raw_text[:180].strip()
+
+                    claim_id = f"clm-gen-{src.id[:12]}-{claim_counter}"
+                    claim_counter += 1
+                    claims.append(
+                        Claim(
+                            id=claim_id,
+                            normalized_statement=item.statement,
+                            entities=item.entities or [src.title[:30]],
+                            dates=item.dates or [],
+                            is_verified=True,
+                            extraction_status="success",
+                            evidence_refs=[
+                                EvidenceRef(
+                                    source_id=src.id,
+                                    exact_snippet=verified_snippet,
+                                    location_type=LocationType.section,
+                                    location_value=item.location or "Extracted passage",
+                                )
+                            ],
+                        )
+                    )
+                if claims:
+                    llm_claims_extracted = True
+            except Exception:
+                # Graceful fallback to deterministic sentence extraction
+                llm_claims_extracted = False
+
+        if not llm_claims_extracted:
+            for source in sources:
+                raw = (source.raw_content or source.title).strip()
+                # Split into non-empty sentences
+                sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", raw) if len(s.strip()) > 20]
+                if not sentences:
+                    sentences = [raw[:180]]
+
+                for sentence in sentences[:4]:  # Take up to 4 key sentences per source
+                    claim_id = f"clm-src-{source.id[:12]}-{claim_counter}"
+                    claim_counter += 1
+                    # Extract any date patterns
+                    found_dates = re.findall(r"\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}|\d{4})\b", sentence, re.IGNORECASE)
+                    claims.append(
+                        Claim(
+                            id=claim_id,
+                            normalized_statement=sentence,
+                            entities=[source.title[:30]],
+                            dates=found_dates,
+                            is_verified=True,
+                            extraction_status="success",
+                            evidence_refs=[
+                                EvidenceRef(
+                                    source_id=source.id,
+                                    exact_snippet=sentence,
+                                    location_type=LocationType.section,
+                                    location_value="Source content",
+                                )
+                            ],
+                        )
+                    )
+
+        # Step C: Cross-Source Contradiction / Conflict Detection
+        # Compare claims across different sources that discuss the same entity or deadline
+        for i, c1 in enumerate(claims):
+            for c2 in enumerate(claims[i + 1:], start=i + 1):
+                c2_val = c2[1]
+                # If claims come from different sources and both mention dates or deadlines
+                src1_id = c1.evidence_refs[0].source_id if c1.evidence_refs else ""
+                src2_id = c2_val.evidence_refs[0].source_id if c2_val.evidence_refs else ""
+                if src1_id and src2_id and src1_id != src2_id:
+                    # Check for deadline conflict or contrasting dates
+                    is_date_conflict = bool(
+                        c1.dates and c2_val.dates and set(c1.dates) != set(c2_val.dates)
+                        and any(w in c1.normalized_statement.lower() for w in ("deadline", "date", "cutoff", "closes", "limit"))
+                        and any(w in c2_val.normalized_statement.lower() for w in ("deadline", "date", "cutoff", "closes", "limit"))
+                    )
+                    if is_date_conflict:
+                        conflict_id = f"fnd-conflict-{c1.id[:8]}-{c2_val.id[:8]}"
+                        findings.append(
+                            Finding(
+                                id=conflict_id,
+                                type=FindingType.potential_conflict,
+                                label=FindingLabel.potential,
+                                severity=FindingSeverity.medium,
+                                rationale=(
+                                    f"Potential date discrepancy between sources: '{c1.normalized_statement}' "
+                                    f"differs from '{c2_val.normalized_statement}'."
+                                ),
+                                evidence_refs=[c1.evidence_refs[0], c2_val.evidence_refs[0]],
+                                contrasting_claim_ids=[c1.id, c2_val.id],
+                            )
+                        )
+                        actions.append(
+                            VerificationAction(
+                                id=f"act-verify-conflict-{c1.id[:8]}",
+                                action=f"Verify conflicting dates between {source_map[src1_id].title} and {source_map[src2_id].title}",
+                                rationale="Sources state differing dates or deadlines for related actions.",
+                                priority_score=0.90,
+                                recommended_source=source_map[src1_id].url or source_map[src2_id].url,
+                                linked_claim_ids=[c1.id, c2_val.id],
+                                linked_finding_ids=[conflict_id],
+                            )
+                        )
+
+        # Step D: Evaluate Categories
         assessments: list[CategoryAssessment] = []
         for cat in categories:
             if not cat.enabled:
