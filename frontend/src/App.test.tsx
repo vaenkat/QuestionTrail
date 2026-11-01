@@ -65,4 +65,20 @@ describe("WorkspaceShell foundation and Phase 2 workflow", () => {
       "https://scholarships.reliancefoundation.org/UG_Scholarship.aspx"
     )
   })
+
+  it("distinguishes Live AI, Precomputed and Mock/Demo modes in StatusBadge", async () => {
+    const { StatusBadge } = await import("./components/StatusBadge")
+
+    const { unmount: u1 } = render(<StatusBadge status="precomputed" label="Curated baseline" />)
+    expect(screen.getByText("Curated baseline")).toBeInTheDocument()
+    u1()
+
+    const { unmount: u2 } = render(<StatusBadge status="supported" label="Live AI Analyzed" />)
+    expect(screen.getByText("Live AI Analyzed")).toBeInTheDocument()
+    u2()
+
+    const { unmount: u3 } = render(<StatusBadge status="mock-demo" label="Mock / Demo" />)
+    expect(screen.getByText("Mock / Demo")).toBeInTheDocument()
+    u3()
+  })
 })

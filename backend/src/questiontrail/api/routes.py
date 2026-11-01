@@ -18,7 +18,7 @@ from questiontrail.domain.models import (
 )
 from questiontrail.settings import Settings, get_settings
 from questiontrail.services.category_service import CategoryService
-from questiontrail.services.analysis_orchestrator import AnalysisOrchestrator
+from questiontrail.services.analysis_orchestrator import AnalysisOrchestrator, AnalysisUnavailableError
 from questiontrail.services.structured_generation import StructuredGenerationService
 from questiontrail.services.url_ingestion import fetch_and_extract_url, IngestionError
 from questiontrail.services.pdf_ingestion import extract_pdf_source
@@ -52,7 +52,10 @@ def get_project_store() -> ProjectStore:
 def get_orchestrator(settings: Settings = Depends(get_settings)) -> AnalysisOrchestrator:
     router_instance = build_router_from_settings(settings)
     gen_service = StructuredGenerationService(router_instance)
-    return AnalysisOrchestrator(generation_service=gen_service)
+    return AnalysisOrchestrator(
+        generation_service=gen_service,
+        provider_mode=settings.llm_provider,
+    )
 
 
 def get_category_service(settings: Settings = Depends(get_settings)) -> CategoryService:
@@ -330,12 +333,18 @@ def analyze_project(
             detail="Cannot analyze project with zero enabled evaluation categories.",
         )
 
-    result, mode = orchestrator.analyze_project(
-        project_id=project_id,
-        objective=project.objective,
-        sources=sources,
-        categories=categories,
-    )
+    try:
+        result, mode = orchestrator.analyze_project(
+            project_id=project_id,
+            objective=project.objective,
+            sources=sources,
+            categories=categories,
+        )
+    except AnalysisUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=exc.message,
+        ) from exc
 
     store.results[project_id] = result
     project.dataset_hash = result.dataset_hash

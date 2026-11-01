@@ -21,6 +21,7 @@ export type StatusVariant =
   | "pre-ingested"
   | "fetched"
   | "precomputed"
+  | "mock-demo"
 
 interface StatusBadgeProps {
   status: StatusVariant
@@ -84,6 +85,17 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, label, classNa
         >
           <Clock className="w-3.5 h-3.5" aria-hidden="true" />
           <span>{label || "Precomputed analysis"}</span>
+        </Badge>
+      )
+    case "mock-demo":
+      return (
+        <Badge 
+          variant="outline" 
+          className={`bg-amber-50 text-amber-800 border-amber-300 font-medium inline-flex items-center gap-1.5 ${className}`}
+          data-testid="status-mock"
+        >
+          <HelpCircle className="w-3.5 h-3.5 text-amber-600" aria-hidden="true" />
+          <span>{label || "Mock / Demo"}</span>
         </Badge>
       )
     case "pre-ingested":

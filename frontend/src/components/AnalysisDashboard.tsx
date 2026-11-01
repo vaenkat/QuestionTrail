@@ -91,10 +91,14 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({
                   ? 'bg-blue-100 text-blue-800'
                   : mode === 'live'
                   ? 'bg-emerald-100 text-emerald-800'
-                  : 'bg-amber-100 text-amber-800'
+                  : 'bg-amber-100 text-amber-800 border border-amber-300'
               }`}
             >
-              {mode === 'precomputed' ? 'Precomputed Analysis' : `${mode} Mode`}
+              {mode === 'precomputed'
+                ? 'Precomputed Analysis'
+                : mode === 'live'
+                ? 'Live AI Analysis'
+                : 'Mock / Demo Analysis'}
             </span>
             <span className="text-xs text-slate-400">•</span>
             <div className="flex items-center gap-1 text-xs text-slate-500 font-mono">
@@ -105,7 +109,9 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({
           <p className="text-xs text-slate-500">
             {mode === 'precomputed'
               ? 'Exact dataset hash matched curated baseline. Provenance verified against source content.'
-              : 'Computed using dynamic analysis engine.'}
+              : mode === 'live'
+              ? 'Computed using live LLM extraction with strict verbatim quotation verification.'
+              : 'Computed using local mock provider for offline development/testing. No external LLM used.'}
           </p>
         </div>
 

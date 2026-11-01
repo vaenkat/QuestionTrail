@@ -190,8 +190,20 @@ export const WorkspaceShell: React.FC = () => {
         <div className="flex items-center gap-3">
           {analysisResult ? (
             <StatusBadge
-              status={analysisMode === 'precomputed' ? 'precomputed' : 'supported'}
-              label={analysisMode === 'precomputed' ? 'Curated baseline' : 'Analyzed'}
+              status={
+                analysisMode === 'precomputed'
+                  ? 'precomputed'
+                  : analysisMode === 'live'
+                  ? 'supported'
+                  : 'mock-demo'
+              }
+              label={
+                analysisMode === 'precomputed'
+                  ? 'Curated baseline'
+                  : analysisMode === 'live'
+                  ? 'Live AI Analyzed'
+                  : 'Mock / Demo'
+              }
             />
           ) : (
             <StatusBadge status="precomputed" label="Curated baseline mode" />

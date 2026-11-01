@@ -98,51 +98,89 @@ def test_get_nonexistent_project_returns_404():
     assert response.status_code == 404
 
 
-def test_ingest_text_source_and_analyze_dynamically():
-    # 1. Create project
-    create_resp = client.post(
-        "/api/projects",
-        json={
-            "objective": "Assess global quantum computing security risks",
-            "categories": [
-                {
-                    "id": "cat-post-quantum",
-                    "name": "Post-Quantum Cryptography",
-                    "description": "Migration timelines and cryptographic vulnerabilities.",
-                    "evaluation_question": "What algorithms are deprecated by NIST?",
-                    "enabled": True,
-                }
-            ],
-        },
-    )
-    assert create_resp.status_code == 200
-    proj_id = create_resp.json()["id"]
+def test_ingest_text_source_and_analyze_with_explicit_mock_mode():
+    from questiontrail.settings import Settings, get_settings
+    # Override app settings to explicit mock mode
+    app.dependency_overrides[get_settings] = lambda: Settings(llm_provider="mock")
 
-    # 2. Ingest raw text source
-    ingest_resp = client.post(
-        f"/api/projects/{proj_id}/sources/text",
-        json={
-            "title": "NIST Post-Quantum Cryptography Standards 2026",
-            "content": "NIST finalized ML-KEM and ML-DSA standards. Legacy RSA-2048 is flagged as vulnerable to quantum cryptanalysis.",
-            "publication_date": "2026-08-15",
-            "url": "https://csrc.nist.gov/pqc",
-        },
-    )
-    assert ingest_resp.status_code == 200
-    data = ingest_resp.json()
-    assert len(data["sources"]) == 1
-    assert data["sources"][0]["title"] == "NIST Post-Quantum Cryptography Standards 2026"
+    try:
+        # 1. Create project
+        create_resp = client.post(
+            "/api/projects",
+            json={
+                "objective": "Assess global quantum computing security risks",
+                "categories": [
+                    {
+                        "id": "cat-post-quantum",
+                        "name": "Post-Quantum Cryptography",
+                        "description": "Migration timelines and cryptographic vulnerabilities.",
+                        "evaluation_question": "What algorithms are deprecated by NIST?",
+                        "enabled": True,
+                    }
+                ],
+            },
+        )
+        assert create_resp.status_code == 200
+        proj_id = create_resp.json()["id"]
 
-    # 3. Analyze dynamically (not curated scholarship!)
-    analyze_resp = client.post(f"/api/projects/{proj_id}/analyze")
-    assert analyze_resp.status_code == 200
-    res = analyze_resp.json()
-    assert res["mode"] in ("live", "mock", "precomputed")
-    result = res["result"]
-    assert result["project_id"] == proj_id
-    assert len(result["claims"]) >= 1
-    # Check that the claim links to our custom NIST source
-    assert result["claims"][0]["evidence_refs"][0]["source_id"] == data["sources"][0]["id"]
+        # 2. Ingest raw text source
+        ingest_resp = client.post(
+            f"/api/projects/{proj_id}/sources/text",
+            json={
+                "title": "NIST Post-Quantum Cryptography Standards 2026",
+                "content": "NIST finalized ML-KEM and ML-DSA standards. Legacy RSA-2048 is flagged as vulnerable to quantum cryptanalysis.",
+                "publication_date": "2026-08-15",
+                "url": "https://csrc.nist.gov/pqc",
+            },
+        )
+        assert ingest_resp.status_code == 200
+        data = ingest_resp.json()
+        assert len(data["sources"]) == 1
+        assert data["sources"][0]["title"] == "NIST Post-Quantum Cryptography Standards 2026"
+
+        # 3. Analyze in explicit mock mode -> 200 OK, mode == "mock"
+        analyze_resp = client.post(f"/api/projects/{proj_id}/analyze")
+        assert analyze_resp.status_code == 200
+        res = analyze_resp.json()
+        assert res["mode"] == "mock"
+        result = res["result"]
+        assert result["project_id"] == proj_id
+        assert len(result["claims"]) >= 1
+        assert result["claims"][0]["evidence_refs"][0]["source_id"] == data["sources"][0]["id"]
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+
+def test_arbitrary_source_live_failure_returns_503_unavailable():
+    from questiontrail.settings import Settings, get_settings
+    # Configure live mode with no keys or failed live provider
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        llm_provider="nvidia",
+        nvidia_api_key=None,
+    )
+
+    try:
+        create_resp = client.post(
+            "/api/projects",
+            json={"objective": "Arbitrary un-cached investigation", "categories": [
+                {"id": "cat-test", "name": "Test Cat", "description": "desc", "evaluation_question": "q?", "enabled": True}
+            ]},
+        )
+        proj_id = create_resp.json()["id"]
+
+        client.post(
+            f"/api/projects/{proj_id}/sources/text",
+            json={"title": "Custom Doc", "content": "Sample content that is not in the curated cache."},
+        )
+
+        # Rule 4: Analyzing arbitrary source when live providers are unavailable MUST return 503
+        analyze_resp = client.post(f"/api/projects/{proj_id}/analyze")
+        assert analyze_resp.status_code == 503
+        detail = analyze_resp.json()["detail"]
+        assert "Live AI analysis unavailable" in detail
+        assert "LLM_PROVIDER=mock" in detail
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
 
 
 def test_ingest_pdf_source_endpoint():

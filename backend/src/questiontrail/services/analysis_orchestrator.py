@@ -81,6 +81,15 @@ EXTRACTION_SCHEMA: dict[str, Any] = {
 }
 
 
+class AnalysisUnavailableError(Exception):
+    """Raised when live AI analysis fails and no matching precomputed snapshot exists."""
+
+    def __init__(self, message: str, reasons: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.message = message
+        self.reasons = reasons or []
+
+
 class AnalysisOrchestrator:
     """Orchestrates research project analysis across sources and evaluation categories."""
 
@@ -88,8 +97,14 @@ class AnalysisOrchestrator:
         self,
         generation_service: StructuredGenerationService | None = None,
         snapshot_store: dict[str, AnalysisSnapshot] | None = None,
+        provider_mode: str | None = None,
     ) -> None:
         self._gen_service = generation_service
+        self._provider_mode = (
+            provider_mode
+            if provider_mode is not None
+            else ("mock" if generation_service is None else "auto")
+        )
         self._snapshots: dict[str, AnalysisSnapshot] = (
             snapshot_store if snapshot_store is not None else {}
         )
@@ -140,29 +155,73 @@ class AnalysisOrchestrator:
         if dataset_hash == curated_snap.dataset_hash:
             return curated_snap.payload, "precomputed"
 
-        # 3. Dynamic Analysis Pipeline
-        result = self._execute_dynamic_analysis(
-            project_id=project_id,
-            dataset_hash=dataset_hash,
-            objective=objective,
-            sources=sources,
-            categories=categories,
-            reference_date=reference_date,
-        )
+        # 3. Explicit Mock Mode (for offline test harnesses & development)
+        if self._provider_mode == "mock":
+            result = self._execute_dynamic_analysis(
+                project_id=project_id,
+                dataset_hash=dataset_hash,
+                objective=objective,
+                sources=sources,
+                categories=categories,
+                reference_date=reference_date,
+                force_deterministic=True,
+            )
+            snapshot = AnalysisSnapshot(
+                dataset_hash=dataset_hash,
+                schema_version=ANALYSIS_SCHEMA_VERSION,
+                provider="mock",
+                model="mock-deterministic-v1",
+                payload=result,
+                created_at=reference_date,
+            )
+            self._snapshots[dataset_hash] = snapshot
+            return result, "mock"
 
-        # 4. Save to snapshot store
-        snapshot = AnalysisSnapshot(
-            dataset_hash=dataset_hash,
-            schema_version=ANALYSIS_SCHEMA_VERSION,
-            provider="mock" if (self._gen_service is None) else "live",
-            model="questiontrail-orchestrator-v1",
-            payload=result,
-            created_at=reference_date,
-        )
-        self._snapshots[dataset_hash] = snapshot
+        # 4. Live Mode (nvidia, gemini, auto):
+        # Attempt live providers through generation service.
+        try:
+            result = self._execute_dynamic_analysis(
+                project_id=project_id,
+                dataset_hash=dataset_hash,
+                objective=objective,
+                sources=sources,
+                categories=categories,
+                reference_date=reference_date,
+                force_deterministic=False,
+            )
+            snapshot = AnalysisSnapshot(
+                dataset_hash=dataset_hash,
+                schema_version=ANALYSIS_SCHEMA_VERSION,
+                provider="live",
+                model="questiontrail-live-orchestrator",
+                payload=result,
+                created_at=reference_date,
+            )
+            self._snapshots[dataset_hash] = snapshot
+            return result, "live"
+        except Exception as exc:
+            # If all live providers fail:
+            # Check Rule 3: permit precomputed fallback ONLY when exact dataset hash and schema match
+            if dataset_hash in self._snapshots:
+                snapshot = self._snapshots[dataset_hash]
+                eligibility = check_snapshot_eligibility(
+                    snapshot=snapshot,
+                    expected_dataset_hash=dataset_hash,
+                    expected_schema_version=ANALYSIS_SCHEMA_VERSION,
+                )
+                if eligibility.is_eligible:
+                    return snapshot.payload, "precomputed"
 
-        mode = "mock" if (self._gen_service is None) else "live"
-        return result, mode
+            # Check Rule 4: For arbitrary uploaded sources without matching cached results,
+            # return a clear typed analysis-unavailable response! Never fabricate mock claims!
+            err_msg = str(exc)
+            raise AnalysisUnavailableError(
+                message=(
+                    f"Live AI analysis unavailable: all configured providers failed ({err_msg}) "
+                    f"and no precomputed verification snapshot exists for this dataset. "
+                    f"Please check your API key configuration in .env, or switch LLM_PROVIDER=mock for offline testing."
+                )
+            ) from exc
 
     def _execute_dynamic_analysis(
         self,
@@ -172,6 +231,7 @@ class AnalysisOrchestrator:
         sources: list[Source],
         categories: list[AssessmentCategory],
         reference_date: datetime,
+        force_deterministic: bool = False,
     ) -> AnalysisResult:
         """Run domain-neutral claim extraction, freshness check, and contradiction detection."""
         claims: list[Claim] = []
@@ -225,67 +285,66 @@ class AnalysisOrchestrator:
         claim_counter = 1
         llm_claims_extracted = False
 
-        if self._gen_service is not None:
-            try:
-                from questiontrail.llm.contracts import GenerationRequest
-                sources_prompt = "\n\n".join(
-                    f"SOURCE ID: {s.id}\nTITLE: {s.title}\nCONTENT:\n{(s.raw_content or s.title)[:1200]}"
-                    for s in sources
-                )
-                req = GenerationRequest(
-                    system_prompt=(
-                        "Extract key factual claims asserted by the provided research sources. "
-                        "CRITICAL PROVENANCE RULE: For each claim, you MUST quote the EXACT verbatim snippet "
-                        "from the source text in `exact_snippet`. Do not alter or summarize the quote."
-                    ),
-                    user_prompt=(
-                        f"Research Objective: {objective}\n\n"
-                        f"Extract substantive claims from these sources:\n{sources_prompt}"
-                    ),
-                    response_schema=EXTRACTION_SCHEMA,
-                    temperature=0.1,
-                )
-                output = self._gen_service.generate_typed(req, ExtractionPayload)
-                parsed_payload: ExtractionPayload = output["parsed"]
+        if not force_deterministic and self._gen_service is not None:
+            from questiontrail.llm.contracts import GenerationRequest
+            sources_prompt = "\n\n".join(
+                f"SOURCE ID: {s.id}\nTITLE: {s.title}\nCONTENT:\n{(s.raw_content or s.title)[:1200]}"
+                for s in sources
+            )
+            req = GenerationRequest(
+                system_prompt=(
+                    "Extract key factual claims asserted by the provided research sources. "
+                    "CRITICAL PROVENANCE RULE: For each claim, you MUST quote the EXACT verbatim snippet "
+                    "from the source text in `exact_snippet`. Do not alter or summarize the quote."
+                ),
+                user_prompt=(
+                    f"Research Objective: {objective}\n\n"
+                    f"Extract substantive claims from these sources:\n{sources_prompt}"
+                ),
+                response_schema=EXTRACTION_SCHEMA,
+                temperature=0.1,
+            )
+            # Re-raises ProviderError/AllProvidersExhausted on failure
+            output = self._gen_service.generate_typed(req, ExtractionPayload)
+            parsed_payload: ExtractionPayload = output["parsed"]
 
-                for item in parsed_payload.claims:
-                    src = source_map.get(item.source_id)
-                    if not src:
-                        continue
-                    # Strict Provenance Verification: snippet MUST exist in source content to prevent hallucination
-                    raw_text = src.raw_content or src.title
-                    snippet = item.exact_snippet.strip()
-                    if snippet and snippet in raw_text:
-                        verified_snippet = snippet
-                    else:
-                        # Fallback to first matching 150 chars of the source text
-                        verified_snippet = raw_text[:180].strip()
+            for item in parsed_payload.claims:
+                src = source_map.get(item.source_id)
+                if not src:
+                    continue
+                # Strict Provenance Verification: snippet MUST exist in source content to prevent hallucination
+                raw_text = src.raw_content or src.title
+                snippet = item.exact_snippet.strip()
+                if snippet and snippet in raw_text:
+                    verified_snippet = snippet
+                else:
+                    # Fallback to first matching 180 chars of the source text
+                    verified_snippet = raw_text[:180].strip()
 
-                    claim_id = f"clm-gen-{src.id[:12]}-{claim_counter}"
-                    claim_counter += 1
-                    claims.append(
-                        Claim(
-                            id=claim_id,
-                            normalized_statement=item.statement,
-                            entities=item.entities or [src.title[:30]],
-                            dates=item.dates or [],
-                            is_verified=True,
-                            extraction_status="success",
-                            evidence_refs=[
-                                EvidenceRef(
-                                    source_id=src.id,
-                                    exact_snippet=verified_snippet,
-                                    location_type=LocationType.section,
-                                    location_value=item.location or "Extracted passage",
-                                )
-                            ],
-                        )
+                claim_id = f"clm-gen-{src.id[:12]}-{claim_counter}"
+                claim_counter += 1
+                claims.append(
+                    Claim(
+                        id=claim_id,
+                        normalized_statement=item.statement,
+                        entities=item.entities or [src.title[:30]],
+                        dates=item.dates or [],
+                        is_verified=True,
+                        extraction_status="success",
+                        evidence_refs=[
+                            EvidenceRef(
+                                source_id=src.id,
+                                exact_snippet=verified_snippet,
+                                location_type=LocationType.section,
+                                location_value=item.location or "Extracted passage",
+                            )
+                        ],
                     )
-                if claims:
-                    llm_claims_extracted = True
-            except Exception:
-                # Graceful fallback to deterministic sentence extraction
-                llm_claims_extracted = False
+                )
+            if claims:
+                llm_claims_extracted = True
+        elif not force_deterministic and self._gen_service is None:
+            raise AnalysisUnavailableError("No generation service available for live AI analysis mode.")
 
         if not llm_claims_extracted:
             for source in sources:

@@ -28,6 +28,35 @@ class AllProvidersExhausted(Exception):
         self.attempts = attempts
 
 
+class UnconfiguredProviderAdapter(LLMAdapterProtocol):
+    """Adapter used when live mode is selected but credentials are not configured.
+
+    Raises a typed ProviderError on invocation so caller can detect failure
+    without silently masking unconfigured credentials.
+    """
+
+    def __init__(self, mode: str) -> None:
+        self._mode = mode
+
+    @property
+    def provider_name(self) -> str:
+        return self._mode
+
+    @property
+    def model_name(self) -> str:
+        return "unconfigured"
+
+    def generate(self, request: GenerationRequest) -> GenerationResult:
+        raise ProviderError(
+            kind=ProviderErrorKind.authentication,
+            provider=self._mode,
+            message=(
+                f"No API key configured for live mode '{self._mode}'. "
+                f"Set NVIDIA_API_KEY or GEMINI_API_KEY in .env, or use LLM_PROVIDER=mock for offline testing."
+            ),
+        )
+
+
 class Router:
     """Routes GenerationRequest through an ordered adapter list.
 
@@ -84,39 +113,42 @@ def build_router_from_settings(settings: "Any") -> Router:  # type: ignore[name-
     """Construct a Router from application Settings.
 
     Provider order:
-      - If mode == "mock": mock-only.
-      - If mode == "nvidia": NVIDIA first, mock fallback.
-      - If mode == "gemini": Gemini first, mock fallback.
-      - If mode == "auto": all configured live providers (with keys), then mock fallback.
+      - If mode == "mock": MockAdapter only.
+      - If mode == "nvidia": NVIDIA NIM only.
+      - If mode == "gemini": Google Gemini only.
+      - If mode == "auto": NVIDIA NIM first, Google Gemini second.
 
-    Adapters are only added when their credentials are present.
-    SecretStr fields are safely unwrapped via get_secret_value().
+    CRITICAL SAFETY RULES:
+      - Adapters are only added when their credentials are non-empty.
+      - Live modes ("nvidia", "gemini", "auto") NEVER fall back to MockAdapter.
+        Live provider failures or missing credentials must never silently fabricate
+        synthetic mock output.
+      - Explicit "mock" mode remains available for offline development and testing.
     """
     from questiontrail.llm.mock import MockAdapter
     from questiontrail.llm.nvidia import NvidiaAdapter
     from questiontrail.llm.gemini import GeminiAdapter
 
     adapters: list[LLMAdapterProtocol] = []
-    # Support both llm_provider and provider_mode attribute names
     mode: str = getattr(settings, "llm_provider", getattr(settings, "provider_mode", "mock"))
 
     raw_nvidia_key = getattr(settings, "nvidia_api_key", None)
     nvidia_key = (
-        raw_nvidia_key.get_secret_value()
-        if hasattr(raw_nvidia_key, "get_secret_value")
-        else raw_nvidia_key
+        raw_nvidia_key.get_secret_value().strip()
+        if hasattr(raw_nvidia_key, "get_secret_value") and raw_nvidia_key
+        else (raw_nvidia_key.strip() if isinstance(raw_nvidia_key, str) else None)
     )
 
     raw_gemini_key = getattr(settings, "gemini_api_key", None)
     gemini_key = (
-        raw_gemini_key.get_secret_value()
-        if hasattr(raw_gemini_key, "get_secret_value")
-        else raw_gemini_key
+        raw_gemini_key.get_secret_value().strip()
+        if hasattr(raw_gemini_key, "get_secret_value") and raw_gemini_key
+        else (raw_gemini_key.strip() if isinstance(raw_gemini_key, str) else None)
     )
 
-    nvidia_model: str = getattr(settings, "nvidia_model", "meta/llama-3.1-70b-instruct")
+    nvidia_model: str = getattr(settings, "nvidia_model", "meta/llama-3.3-70b-instruct")
     gemini_model: str = getattr(settings, "gemini_model", "gemini-2.0-flash")
-    use_mock_fallback: bool = getattr(settings, "use_mock_fallback", True)
+    use_mock_fallback: bool = getattr(settings, "use_mock_fallback", False)
 
     if mode == "mock":
         adapters.append(MockAdapter())
@@ -128,8 +160,15 @@ def build_router_from_settings(settings: "Any") -> Router:  # type: ignore[name-
     if mode in ("gemini", "auto") and gemini_key:
         adapters.append(GeminiAdapter(api_key=gemini_key, model=gemini_model))
 
-    if not adapters or use_mock_fallback:
+    # If mock fallback was explicitly requested (e.g. in a test fixture)
+    if use_mock_fallback:
         adapters.append(MockAdapter())
+        return Router(adapters)
+
+    # In live modes with no credentials configured, use UnconfiguredProviderAdapter
+    # so an explicit, typed ProviderError is raised rather than silent mock fallback.
+    if not adapters:
+        adapters.append(UnconfiguredProviderAdapter(mode))
 
     return Router(adapters)
 

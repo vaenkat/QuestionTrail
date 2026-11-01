@@ -305,13 +305,15 @@ class TestRouterSettings:
             nvidia_api_key="nv-secret-key-12345",
         )
         router = build_router_from_settings(s)
-        assert len(router.adapters) == 2
+        assert len(router.adapters) == 1
         assert router.adapters[0].provider_name == "nvidia"
-        assert router.adapters[1].provider_name == "mock"
 
-    def test_nvidia_mode_missing_key_falls_back_to_mock(self):
+    def test_nvidia_mode_missing_key_does_not_fall_back_to_mock(self):
+        import pytest
         from questiontrail.settings import Settings
         from questiontrail.llm.router import build_router_from_settings
+        from questiontrail.llm.contracts import ProviderError, ProviderErrorKind, GenerationRequest
+        from questiontrail.llm.router import AllProvidersExhausted
 
         s = Settings(
             llm_provider="nvidia",
@@ -319,9 +321,14 @@ class TestRouterSettings:
         )
         router = build_router_from_settings(s)
         assert len(router.adapters) == 1
-        assert router.adapters[0].provider_name == "mock"
+        assert router.adapters[0].provider_name == "nvidia"
+        # When invoked, raises typed ProviderError wrapped in AllProvidersExhausted
+        with pytest.raises(AllProvidersExhausted) as excinfo:
+            router.generate(GenerationRequest(user_prompt="test", response_schema={}))
+        assert excinfo.value.attempts[0].error_kind == ProviderErrorKind.authentication
+        assert "No API key configured" in excinfo.value.attempts[0].error_message
 
-    def test_auto_mode_orders_providers_then_mock(self):
+    def test_auto_mode_orders_live_providers_without_mock(self):
         from questiontrail.settings import Settings
         from questiontrail.llm.router import build_router_from_settings
 
@@ -332,7 +339,18 @@ class TestRouterSettings:
         )
         router = build_router_from_settings(s)
         names = [a.provider_name for a in router.adapters]
-        assert names == ["nvidia", "gemini", "mock"]
+        assert names == ["nvidia", "gemini"]
+
+    def test_explicit_mock_mode_uses_mock_adapter(self):
+        from questiontrail.settings import Settings
+        from questiontrail.llm.router import build_router_from_settings
+
+        s = Settings(
+            llm_provider="mock",
+        )
+        router = build_router_from_settings(s)
+        assert len(router.adapters) == 1
+        assert router.adapters[0].provider_name == "mock"
 
 
 class TestCredentialSafety:
