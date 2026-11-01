@@ -37,7 +37,7 @@ export const CategoryCard: React.FC<CategoryCardProps> = ({
         return (
           <span className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
             <AlertCircle className="w-3.5 h-3.5" />
-            Conflicting
+            Potential Date Discrepancy
           </span>
         );
       case 'requires_verification':
@@ -126,7 +126,7 @@ export const CategoryCard: React.FC<CategoryCardProps> = ({
       {contraryClaims.length > 0 && (
         <div className="space-y-2">
           <label className="text-xs font-semibold text-amber-700 uppercase tracking-wider">
-            Contradictory / Contrasting Claims ({contraryClaims.length})
+            Contrasting Claims / Potential Discrepancies ({contraryClaims.length})
           </label>
           <div className="space-y-2">
             {contraryClaims.map((claim) => (

@@ -402,8 +402,9 @@ class AnalysisOrchestrator:
                                 label=FindingLabel.potential,
                                 severity=FindingSeverity.medium,
                                 rationale=(
-                                    f"Potential date discrepancy between sources: '{c1.normalized_statement}' "
-                                    f"differs from '{c2_val.normalized_statement}'."
+                                    f"Potential Date Discrepancy — Requires Verification: Sources list different dates: "
+                                    f"'{c1.normalized_statement}' and '{c2_val.normalized_statement}'. "
+                                    f"These dates may refer to different application or platform events; verify the applicable deadline with the primary official source."
                                 ),
                                 evidence_refs=[c1.evidence_refs[0], c2_val.evidence_refs[0]],
                                 contrasting_claim_ids=[c1.id, c2_val.id],
@@ -412,8 +413,8 @@ class AnalysisOrchestrator:
                         actions.append(
                             VerificationAction(
                                 id=f"act-verify-conflict-{c1.id[:8]}",
-                                action=f"Verify conflicting dates between {source_map[src1_id].title} and {source_map[src2_id].title}",
-                                rationale="Sources state differing dates or deadlines for related actions.",
+                                action=f"Verify applicable deadline and date discrepancy between '{source_map[src1_id].title}' and '{source_map[src2_id].title}'",
+                                rationale="Reviewed sources state differing dates or cutoff deadlines which may refer to distinct platform events.",
                                 priority_score=0.90,
                                 recommended_source=source_map[src1_id].url or source_map[src2_id].url,
                                 linked_claim_ids=[c1.id, c2_val.id],

@@ -94,3 +94,35 @@ def test_cache_safety_fails_on_tampered_source():
     assert res.is_eligible is False
     assert res.dataset_hash_matched is False
     assert "Dataset content mismatch" in res.reason
+
+
+def test_epistemic_accuracy_and_discrepancy_wording():
+    """Verify epistemic accuracy: potential discrepancy classification, event type distinction, and historical cycle notice."""
+    result = get_curated_analysis_result()
+
+    # Finding fnd-deadline-discrepancy
+    discrepancy_fnd = next(f for f in result.findings if f.id == "fnd-deadline-discrepancy")
+    assert "Potential Date Discrepancy" in discrepancy_fnd.rationale
+    assert "Requires Verification" in discrepancy_fnd.rationale
+    assert "October 6" in discrepancy_fnd.rationale
+    assert "October 5" in discrepancy_fnd.rationale
+    assert "platform registration cutoff" in discrepancy_fnd.rationale
+    assert "Historical application-cycle review" in discrepancy_fnd.rationale
+    assert "the listed 2026 application dates have passed as of November 1, 2026" in discrepancy_fnd.rationale
+
+    # Preserves exact evidence references for all 3 sources
+    source_ids = [ref.source_id for ref in discrepancy_fnd.evidence_refs]
+    assert "src-rf-portal-2627" in source_ids
+    assert "src-b4s-listing-2627" in source_ids
+    assert "src-unstop-listing-2627" in source_ids
+
+    # Unstop claim distinguishes event type
+    unstop_claim = next(c for c in result.claims if c.id == "clm-unstop-deadline")
+    assert "platform registration cutoff" in unstop_claim.normalized_statement.lower()
+
+    # Executive summary includes discrepancy terminology and historical cycle notice
+    assert "Potential Date Discrepancy" in result.summary
+    assert "Requires Verification" in result.summary
+    assert "Historical application-cycle review" in result.summary
+    assert "the listed 2026 application dates have passed as of November 1, 2026" in result.summary
+    assert "guidance must not be assumed to apply automatically" in result.summary.lower()

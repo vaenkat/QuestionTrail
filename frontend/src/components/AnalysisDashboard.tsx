@@ -147,11 +147,11 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
           <div className="flex items-center justify-between text-slate-500 text-xs font-medium">
-            <span>Verified Claims</span>
+            <span>Evidence-linked Claims</span>
             <Sparkles className="w-4 h-4 text-teal-500" />
           </div>
           <div className="text-2xl font-bold text-teal-700">{result.claims.length}</div>
-          <div className="text-[11px] text-slate-400">Supported by exact quotes</div>
+          <div className="text-[11px] text-slate-400">Claims supported by traceable source excerpts.</div>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-1">
@@ -161,7 +161,7 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({
           </div>
           <div className="text-2xl font-bold text-slate-900">{result.findings.length}</div>
           <div className="text-[11px] text-amber-600 font-medium">
-            {conflictCount} conflict · {datedCount} dated · {gapCount} gap
+            {conflictCount === 1 ? '1 potential date discrepancy' : `${conflictCount} potential date discrepancies`} · {datedCount} dated · {gapCount} gap
           </div>
         </div>
 
@@ -177,9 +177,14 @@ export const AnalysisDashboard: React.FC<AnalysisDashboardProps> = ({
 
       {/* Executive Summary */}
       {result.summary && (
-        <div className="bg-teal-50/50 border border-teal-200/60 rounded-xl p-4 text-sm text-slate-800 leading-relaxed space-y-1">
-          <div className="text-xs font-bold uppercase tracking-wider text-teal-900">
-            Executive Synthesis
+        <div className="bg-teal-50/50 border border-teal-200/60 rounded-xl p-4 text-sm text-slate-800 leading-relaxed space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-bold uppercase tracking-wider text-teal-900">
+              Executive Synthesis
+            </div>
+            <div className="text-[11px] text-slate-600 italic bg-white/80 px-2.5 py-0.5 rounded-md border border-teal-200/60">
+              Historical application-cycle review — the listed 2026 application dates have passed as of November 1, 2026.
+            </div>
           </div>
           <p>{result.summary}</p>
         </div>

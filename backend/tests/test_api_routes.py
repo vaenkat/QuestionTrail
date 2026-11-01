@@ -91,6 +91,9 @@ def test_project_lifecycle_end_to_end():
     assert report["total_actions"] == len(result["actions"])
     assert "# Research Verification Report" in report["markdown_report"]
     assert "Verification Checklist" in report["markdown_report"]
+    assert "Evidence-linked Claims" in report["markdown_report"]
+    assert "Historical application-cycle review" in report["markdown_report"]
+    assert "POTENTIAL DATE DISCREPANCY" in report["markdown_report"]
 
 
 def test_get_nonexistent_project_returns_404():

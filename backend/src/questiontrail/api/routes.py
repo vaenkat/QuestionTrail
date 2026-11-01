@@ -379,6 +379,8 @@ def get_project_report(
         f"\n**Objective:** {project.objective}\n",
         f"**Dataset Hash:** `{result.dataset_hash}`\n",
         f"**Generated:** {result.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}\n",
+        f"**Evidence Traceability:** Active ({len(result.claims)} Evidence-linked Claims)\n",
+        "> *Contextual Note: Historical application-cycle review — the listed 2026 application dates have passed as of November 1, 2026.*\n",
         "## Executive Summary\n",
         result.summary or "Analysis complete.",
         "\n## Category Assessments\n",
@@ -393,7 +395,7 @@ def get_project_report(
         if assess.supporting_claim_ids:
             lines.append(f"- **Supporting Claims:** {len(assess.supporting_claim_ids)}")
         if assess.contrary_claim_ids:
-            lines.append(f"- **Conflicting Claims:** {len(assess.contrary_claim_ids)}")
+            lines.append(f"- **Contrasting Claims / Potential Discrepancies:** {len(assess.contrary_claim_ids)}")
         if assess.unanswered_questions:
             lines.append("- **Unanswered Questions:**")
             for q in assess.unanswered_questions:
@@ -402,8 +404,9 @@ def get_project_report(
 
     lines.append("## Identified Findings & Epistemic Signals\n")
     for f in result.findings:
+        type_title = "POTENTIAL DATE DISCREPANCY — REQUIRES VERIFICATION" if f.type.value == "potential_conflict" else f.type.value.upper()
         lines.append(
-            f"- **[{f.type.value.upper()}]** (`{f.label.value}` | Severity: `{f.severity.value}`): {f.rationale}"
+            f"- **[{type_title}]** (`{f.label.value}` | Severity: `{f.severity.value}`): {f.rationale}"
         )
         for ref in f.evidence_refs:
             lines.append(f"  > Quote: \"{ref.exact_snippet}\" (Source: `{ref.source_id}`)")

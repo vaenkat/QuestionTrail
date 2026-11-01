@@ -12,6 +12,7 @@ describe("WorkspaceShell foundation and Phase 2 workflow", () => {
     expect(screen.getByText("QuestionTrail")).toBeInTheDocument()
     expect(screen.getByText("Evidence-first research workspace")).toBeInTheDocument()
     expect(screen.getByText("Curated baseline mode")).toBeInTheDocument()
+    expect(screen.getByText("Evidence Traceability Active")).toBeInTheDocument()
     
     // Objective input
     expect(screen.getByText("1. Research Objective")).toBeInTheDocument()
@@ -80,5 +81,70 @@ describe("WorkspaceShell foundation and Phase 2 workflow", () => {
     const { unmount: u3 } = render(<StatusBadge status="mock-demo" label="Mock / Demo" />)
     expect(screen.getByText("Mock / Demo")).toBeInTheDocument()
     u3()
+  })
+
+  it("renders epistemic accuracy terminology and historical cycle notice", async () => {
+    const { AnalysisDashboard } = await import("./components/AnalysisDashboard")
+    const mockResult = {
+      project_id: "proj-scholarship-curated",
+      dataset_hash: "abcd1234efgh5678",
+      analysis_schema_version: "1.0.0",
+      created_at: new Date().toISOString(),
+      sources: [
+        {
+          id: "src-rf-portal",
+          title: "Portal",
+          type: "webpage" as const,
+          authority: "primary_official" as const,
+          url: "https://example.com",
+          retrieved_at: new Date().toISOString(),
+          extraction_status: "success" as const,
+        },
+      ],
+      claims: [
+        {
+          id: "clm-1",
+          normalized_statement: "Statement",
+          entities: [],
+          dates: [],
+          is_verified: true,
+          extraction_status: "success" as const,
+          evidence_refs: [],
+        },
+      ],
+      assessments: [],
+      findings: [
+        {
+          id: "fnd-1",
+          type: "potential_conflict" as const,
+          label: "potential" as const,
+          severity: "medium" as const,
+          rationale: "Discrepancy notice",
+          evidence_refs: [],
+        },
+      ],
+      actions: [],
+      summary: "Curated summary text",
+    }
+
+    render(
+      <AnalysisDashboard
+        result={mockResult}
+        mode="precomputed"
+        categories={[]}
+        onSelectEvidence={() => {}}
+        onReset={() => {}}
+      />
+    )
+
+    // Epistemic KPI labels
+    expect(screen.getByText("Evidence-linked Claims")).toBeInTheDocument()
+    expect(screen.getByText("Claims supported by traceable source excerpts.")).toBeInTheDocument()
+    expect(screen.getByText(/1 potential date discrepancy/i)).toBeInTheDocument()
+
+    // Historical cycle contextual notice
+    expect(
+      screen.getByText(/Historical application-cycle review — the listed 2026 application dates have passed as of November 1, 2026./i)
+    ).toBeInTheDocument()
   })
 })

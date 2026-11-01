@@ -22,6 +22,19 @@ export const FindingCard: React.FC<FindingCardProps> = ({ finding, sourcesMap, o
     }
   };
 
+  const getFindingTitle = () => {
+    switch (finding.type) {
+      case 'potential_conflict':
+        return 'Potential Date Discrepancy — Requires Verification';
+      case 'dated_information':
+        return 'Dated Source Information';
+      case 'information_gap':
+        return 'Information Gap';
+      default:
+        return finding.type.replace('_', ' ');
+    }
+  };
+
   const getBorderColor = () => {
     switch (finding.type) {
       case 'potential_conflict':
@@ -41,8 +54,8 @@ export const FindingCard: React.FC<FindingCardProps> = ({ finding, sourcesMap, o
         <div className="flex items-center gap-2">
           {getFindingIcon()}
           <div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              {finding.type.replace('_', ' ')}
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+              {getFindingTitle()}
             </span>
             <div className="flex items-center gap-2 mt-0.5">
               <span

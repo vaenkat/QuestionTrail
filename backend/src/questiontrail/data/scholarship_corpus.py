@@ -293,7 +293,7 @@ def get_curated_analysis_result() -> AnalysisResult:
         ),
         Claim(
             id="clm-official-deadline",
-            normalized_statement="The official online application deadline is October 6, 2026 at 11:59 PM IST.",
+            normalized_statement="The official online application deadline is October 6, 2026 at 11:59 PM IST (national scholarship portal submission deadline).",
             entities=["Application Deadline", "Reliance Foundation Portal"],
             dates=["2026-10-06"],
             is_verified=True,
@@ -325,7 +325,7 @@ def get_curated_analysis_result() -> AnalysisResult:
         ),
         Claim(
             id="clm-unstop-deadline",
-            normalized_statement="Unstop lists a platform registration deadline of 30 September 2026.",
+            normalized_statement="Unstop lists an internal platform registration cutoff of 30 September 2026 (distinct from the national portal deadline).",
             entities=["Unstop", "Platform Registration"],
             dates=["2026-09-30"],
             is_verified=False,
@@ -379,8 +379,16 @@ def get_curated_analysis_result() -> AnalysisResult:
             status=AssessmentStatus.conflicting,
             supporting_claim_ids=["clm-official-deadline"],
             contrary_claim_ids=["clm-b4s-deadline", "clm-unstop-deadline"],
-            unanswered_questions=["Why does Buddy4Study show 5 October while the official portal states 6 October 2026?"],
-            rationale="Conflicting dates identified: official portal specifies October 6, 2026, while third-party sites report October 5 (Buddy4Study) and September 30 (Unstop platform cutoff).",
+            unanswered_questions=[
+                "Does Buddy4Study's 5 October date reflect a distinct partner cutoff or an inaccurate listing compared to the official 6 October deadline?",
+                "Does Unstop's 30 September cutoff apply solely to internal platform registration or affect final scholarship eligibility?"
+            ],
+            rationale=(
+                "Potential date discrepancy requiring verification: the official portal specifies October 6, 2026 at 11:59 PM IST for final application submission, "
+                "while Buddy4Study lists October 5, and Unstop lists September 30 as its platform registration cutoff. "
+                "These dates may refer to different application or platform events. "
+                "Historical application-cycle review — the listed 2026 application dates have passed as of November 1, 2026."
+            ),
         ),
         CategoryAssessment(
             category_id="cat-renewal-policy",
@@ -388,10 +396,14 @@ def get_curated_analysis_result() -> AnalysisResult:
             supporting_claim_ids=[],
             contrary_claim_ids=[],
             unanswered_questions=[
-                "Are the 2026-27 renewal requirements identical to the 2024-25 criteria (minimum 60% semester aggregate)?",
+                "Are the 2026-27 renewal requirements identical to the historical 2024-25 criteria (minimum 60% semester aggregate)?",
                 "Has Reliance Foundation published an updated 2026-27 FAQ document?"
             ],
-            rationale="Information gap: 2026-27 official materials do not detail renewal or maintenance conditions; only the archived 2024-25 FAQ mentions a 60% semester requirement.",
+            rationale=(
+                "Information gap: 2026-27 official materials do not detail renewal or continuation conditions; "
+                "only the archived 2024-25 FAQ mentions a 60% semester requirement. "
+                "Historical 2024-25 guidance must not be assumed to apply automatically to the 2026-27 cohort without official confirmation."
+            ),
         ),
     ]
 
@@ -401,7 +413,13 @@ def get_curated_analysis_result() -> AnalysisResult:
             type=FindingType.potential_conflict,
             label=FindingLabel.potential,
             severity=FindingSeverity.medium,
-            rationale="Aggregators list different dates than the primary official portal. Unstop notes its date is a platform cutoff, but Buddy4Study does not qualify its 5 October date.",
+            rationale=(
+                "Potential Date Discrepancy — Requires Verification: The reviewed sources list different dates: "
+                "the official portal specifies October 6, Buddy4Study lists October 5, and Unstop lists September 30 "
+                "as its platform registration cutoff. These dates may refer to different application or platform events. "
+                "Verify the applicable deadline through the official scholarship portal. "
+                "(Historical application-cycle review — the listed 2026 application dates have passed as of November 1, 2026)."
+            ),
             evidence_refs=[
                 EvidenceRef(
                     source_id="src-rf-portal-2627",
@@ -415,15 +433,24 @@ def get_curated_analysis_result() -> AnalysisResult:
                     location_type=LocationType.section,
                     location_value="Key Details",
                 ),
+                EvidenceRef(
+                    source_id="src-unstop-listing-2627",
+                    exact_snippet="Platform Registration Deadline: 30 September 2026. Note: Unstop registration portal closes earlier than the national application deadline.",
+                    location_type=LocationType.section,
+                    location_value="Opportunity Overview",
+                ),
             ],
-            contrasting_claim_ids=["clm-official-deadline", "clm-b4s-deadline"],
+            contrasting_claim_ids=["clm-official-deadline", "clm-b4s-deadline", "clm-unstop-deadline"],
         ),
         Finding(
             id="fnd-stale-source-warning",
             type=FindingType.dated_information,
             label=FindingLabel.confirmed,
             severity=FindingSeverity.high,
-            rationale="Publication date is August 1, 2024, referencing the 2024-25 cycle. Deterministic date check flags it as stale relative to the 2026-27 cycle.",
+            rationale=(
+                "Archived 2024-25 FAQ references a past cycle (published August 1, 2024 with a September 15, 2024 deadline). "
+                "Renewal rules and timelines from this 2024-25 document cannot be assumed to apply automatically to the 2026-27 cohort."
+            ),
             evidence_refs=[
                 EvidenceRef(
                     source_id="src-rf-faq-2425",
@@ -455,17 +482,17 @@ def get_curated_analysis_result() -> AnalysisResult:
     actions = [
         VerificationAction(
             id="act-verify-deadline-portal",
-            action="Confirm final submission timestamp directly on the official Reliance Foundation portal.",
-            rationale="Aggregator dates (5 Oct, 30 Sep) differ from the official deadline of October 6, 2026.",
+            action="Verify applicable submission deadline and platform cutoff dates directly through the official Reliance Foundation portal.",
+            rationale="Reviewed sources list different dates (October 6 official portal, October 5 Buddy4Study, September 30 Unstop platform cutoff) which may refer to distinct platform events.",
             priority_score=0.95,
             recommended_source="https://scholarships.reliancefoundation.org/UG_Scholarship.aspx",
-            linked_claim_ids=["clm-official-deadline", "clm-b4s-deadline"],
+            linked_claim_ids=["clm-official-deadline", "clm-b4s-deadline", "clm-unstop-deadline"],
             linked_finding_ids=["fnd-deadline-discrepancy"],
         ),
         VerificationAction(
             id="act-verify-renewal-rules",
-            action="Request or inspect official 2026-27 FAQ for multi-year renewal GPA / marks requirements.",
-            rationale="2026-27 official documentation omits renewal criteria; only 2024-25 guidance (60% marks) exists.",
+            action="Inspect official 2026-27 announcements or contact support to verify whether multi-year renewal rules differ from 2024-25.",
+            rationale="2026-27 official sources omit renewal criteria; 2024-25 archive rules (60% marks) cannot be assumed valid for 2026-27 scholars.",
             priority_score=0.80,
             recommended_source="Reliance Foundation Scholarship Support Desk",
             linked_claim_ids=["clm-renewal-archive-2425"],
@@ -492,13 +519,15 @@ def get_curated_analysis_result() -> AnalysisResult:
         findings=findings,
         actions=actions,
         summary=(
-            "The available sources confirm key parameters of the Reliance Foundation Undergraduate "
-            "Scholarship 2026–27: up to 5,000 awards of up to Rs 2 Lakhs for first-year undergraduates with "
+            "The reviewed sources provide evidence on core parameters of the Reliance Foundation Undergraduate "
+            "Scholarship 2026–27: up to 5,000 awards of up to Rs 2 Lakhs for eligible first-year undergraduates with "
             "household income under Rs 15 Lakhs and Class 12 marks of at least 60%. "
-            "However, two key verification issues exist: (1) conflicting application deadlines across official "
-            "and third-party sources (October 6 official vs October 5 Buddy4Study and September 30 Unstop cutoff), "
-            "and (2) an absence of official 2026–27 renewal guidelines, which are only documented in an outdated "
-            "2024–25 archive FAQ."
+            "However, two key verification issues exist: (1) Potential Date Discrepancy — Requires Verification: "
+            "The reviewed sources list different dates: the official portal specifies October 6, Buddy4Study lists October 5, "
+            "and Unstop lists September 30 as its platform registration cutoff. These dates may refer to different application or platform events; "
+            "verify the applicable deadline through the official scholarship portal. "
+            "(Historical application-cycle review — the listed 2026 application dates have passed as of November 1, 2026). "
+            "(2) Renewal criteria are omitted from 2026–27 official documents; historical 2024–25 guidance must not be assumed to apply automatically."
         ),
     )
 

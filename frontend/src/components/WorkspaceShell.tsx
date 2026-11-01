@@ -210,7 +210,7 @@ export const WorkspaceShell: React.FC = () => {
           )}
           <div className="flex items-center gap-1.5 text-[14px] text-[#475569] bg-slate-100 px-3 py-1.5 rounded-md border border-[#CBD5E1]">
             <ShieldCheck className="w-4 h-4 text-[#0F766E]" aria-hidden="true" />
-            <span>Provenance Safe</span>
+            <span>Evidence Traceability Active</span>
           </div>
         </div>
       </header>
